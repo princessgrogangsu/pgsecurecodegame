@@ -1,249 +1,71 @@
-'''
-Please note:
-
-The first file that you should run in this level is tests.py for database creation, with all tests passing.
-Remember that running the hack.py will change the state of the database, causing some tests inside tests.py
-to fail.
-
-If you like to return to the initial state of the database, please delete the database (level-4.db) and run 
-the tests.py again to recreate it.
-'''
-
 import sqlite3
-import os
-from flask import Flask, request
 
-### Unrelated to the exercise -- Starts here -- Please ignore
-app = Flask(__name__)
-@app.route("/")
-def source():
-    DB_CRUD_ops().get_stock_info(request.args["input"])
-    DB_CRUD_ops().get_stock_price(request.args["input"])
-    DB_CRUD_ops().update_stock_price(request.args["input"])
-    DB_CRUD_ops().exec_multi_query(request.args["input"])
-    DB_CRUD_ops().exec_user_script(request.args["input"])
-### Unrelated to the exercise -- Ends here -- Please ignore
+# Please note: The following code is NOT expected to run and it's provided for explanation only
 
-class Connect(object):
+# Vulnerable: this code will allow an attacker to insert the "DROP TABLE" SQL command into the query
+# and delete all users from the database.
+con = sqlite3.connect('example.db')
+user_input = "Mary'); DROP TABLE Users;--"
+sql_stmt = "INSERT INTO Users (user) VALUES ('" + user_input + "');"
+con.executescript(sql_stmt)
 
-    # helper function creating database with the connection
-    def create_connection(self, path):
-        connection = None
-        try:
-            connection = sqlite3.connect(path)
-        except sqlite3.Error as e:
-            print(f"ERROR: {e}")
-        return connection
+# Secure through Parameterized Statements
+con = sqlite3.connect('example.db')
+user_input = "Mary'); DROP TABLE Users;--"
+# The secure way to query a database is
+con.execute("INSERT INTO Users (user) VALUES (?)", (user_input,))
 
-class Create(object):
+# Solution explanation:
 
-    def __init__(self):
-        con = Connect()
-        try:
-            # creates a dummy database inside the folder of this challenge
-            path = os.path.dirname(os.path.abspath(__file__))
-            db_path = os.path.join(path, 'level-4.db')
-            db_con = con.create_connection(db_path)
-            cur = db_con.cursor()
+# The methodology used above to protect against SQL injection is the usage of parameterized
+# statements. They protect against user input tampering with the query logic
+# by using '?' as user input placeholders.
 
-            # checks if tables already exist, which will happen when re-running code
-            table_fetch = cur.execute(
-                '''
-                SELECT name 
-                FROM sqlite_master 
-                WHERE type='table'AND name='stocks';
-                ''').fetchall()
+# In the example above, the user input, as wrong as it is, will be inserted into the database
+# as a new user, but the DROP TABLE command will not be executed.
 
-            # if tables do not exist, create them and insert dummy data
-            if table_fetch == []:
-                cur.execute(
-                    '''
-                    CREATE TABLE stocks
-                    (date text, symbol text, price real)
-                    ''')
+# code.py has 5 methods namely:
+# (1) get_stock_info
+# (2) get_stock_price
+# (3) update_stock_price
+# (4) exec_multi_query
+# (5) exec_user_script
 
-                # inserts dummy data to the 'stocks' table, representing average price on date
-                cur.execute(
-                    "INSERT INTO stocks VALUES ('2022-01-06', 'MSFT', 300.00)")
-                db_con.commit()
+# All methods are vulnerable!
 
-        except sqlite3.Error as e:
-            print(f"ERROR: {e}")
+# Some are also suffering from bad design.
+# We believe that methods 1, 2, and 3 have a more security-friendly design compared
+# to methods 4 and 5.
 
-        finally:
-            db_con.close()
+# This is because methods 4 and 5, by design, provide attackers with the chance of
+# arbitrary script execution.
 
-class DB_CRUD_ops(object):
+# We believe that security plays an important role and methods like 4 and 5 should be
+# avoided fully.
 
-    # retrieves all info about a stock symbol from the stocks table
-    # Example: get_stock_info('MSFT') will result into executing
-    # SELECT * FROM stocks WHERE symbol = 'MSFT'
-    def get_stock_info(self, stock_symbol):
-        # building database from scratch as it is more suitable for the purpose of the lab
-        db = Create()
-        con = Connect()
-        try:
-            path = os.path.dirname(os.path.abspath(__file__))
-            db_path = os.path.join(path, 'level-4.db')
-            db_con = con.create_connection(db_path)
-            cur = db_con.cursor()
+# We, therefore, propose in our model solution to completely remove them instead of
+# trying to secure them in their existing form. A better approach would be to design
+# them from the beginning, like methods 1, 2, and 3, so that user input could be a
+# placeholder in pre-existing logic, instead of giving users the power of directly
+# injecting logic.
 
-            res = "[METHOD EXECUTED] get_stock_info\n"
-            query = "SELECT * FROM stocks WHERE symbol = '{0}'".format(stock_symbol)
-            res += "[QUERY] " + query + "\n"
+# More details:
+# One protection available to prevent SQL injection is the use of prepared statements,
+# a database feature executing repeated queries. The protection stems from
+# the fact that queries are no longer executed dynamically.
 
-            # a block list (aka restricted characters) that should not exist in user-supplied input
-            restricted_chars = ";%&^!#-"
-            # checks if input contains characters from the block list
-            has_restricted_char = any([char in query for char in restricted_chars])
-            # checks if input contains a wrong number of single quotes against SQL injection
-            correct_number_of_single_quotes = query.count("'") == 2
+# The user input will be passed to a template placeholder, which means
+# that even if someone manages to pass unsanitized data to a query, the injection
+# will not be in position to modify the databases' query template. Therefore no SQL
+# injection will occur.
 
-            # performs the checks for good cyber security and safe software against SQL injection
-            if has_restricted_char or not correct_number_of_single_quotes:
-                # in case you want to sanitize user input, please uncomment the following 2 lines
-                # sanitized_query = query.translate({ord(char):None for char in restricted_chars})
-                # res += "[SANITIZED_QUERY]" + sanitized_query + "\n"
-                res += "CONFIRM THAT THE ABOVE QUERY IS NOT MALICIOUS TO EXECUTE"
-            else:
-                cur.execute(query)
+# Widely-used web frameworks such as Ruby on Rails and Django offer built-in
+# protection to help prevent SQL injection, but that shouldn't stop you from
+# following good practices. Contextually, be careful when handling user input
+# by planning for the worst and never trusting the user.
 
-                query_outcome = cur.fetchall()
-                for result in query_outcome:
-                    res += "[RESULT] " + str(result)
-            return res
+# The GitHub Security Lab covered this flaw in one episode of Security Bites,
+# its series on secure programming: https://youtu.be/VE6c57Tk5gM
 
-        except sqlite3.Error as e:
-            print(f"ERROR: {e}")
-
-        finally:
-            db_con.close()
-
-    # retrieves the price of a stock symbol from the stocks table
-    # Example: get_stock_price('MSFT') will result into executing
-    # SELECT price FROM stocks WHERE symbol = 'MSFT'
-    def get_stock_price(self, stock_symbol):
-        # building database from scratch as it is more suitable for the purpose of the lab
-        db = Create()
-        con = Connect()
-        try:
-            path = os.path.dirname(os.path.abspath(__file__))
-            db_path = os.path.join(path, 'level-4.db')
-            db_con = con.create_connection(db_path)
-            cur = db_con.cursor()
-
-            res = "[METHOD EXECUTED] get_stock_price\n"
-            query = "SELECT price FROM stocks WHERE symbol = '" + stock_symbol + "'"
-            res += "[QUERY] " + query + "\n"
-            if ';' in query:
-                res += "[SCRIPT EXECUTION]\n"
-                cur.executescript(query)
-            else:
-                cur.execute(query)
-                query_outcome = cur.fetchall()
-                for result in query_outcome:
-                    res += "[RESULT] " + str(result) + "\n"
-            return res
-
-        except sqlite3.Error as e:
-            print(f"ERROR: {e}")
-
-        finally:
-            db_con.close()
-
-    # updates stock price
-    def update_stock_price(self, stock_symbol, price):
-        # building database from scratch as it is more suitable for the purpose of the lab
-        db = Create()
-        con = Connect()
-        try:
-            path = os.path.dirname(os.path.abspath(__file__))
-            db_path = os.path.join(path, 'level-4.db')
-            db_con = con.create_connection(db_path)
-            cur = db_con.cursor()
-
-            if not isinstance(price, float):
-                raise Exception("ERROR: stock price provided is not a float")
-
-            res = "[METHOD EXECUTED] update_stock_price\n"
-            # UPDATE stocks SET price = 310.0 WHERE symbol = 'MSFT'
-            query = "UPDATE stocks SET price = '%d' WHERE symbol = '%s'" % (price, stock_symbol)
-            res += "[QUERY] " + query + "\n"
-
-            cur.execute(query)
-            db_con.commit()
-            query_outcome = cur.fetchall()
-            for result in query_outcome:
-                res += "[RESULT] " + result
-            return res
-
-        except sqlite3.Error as e:
-            print(f"ERROR: {e}")
-
-        finally:
-            db_con.close()
-
-    # executes multiple queries
-    # Example: SELECT price FROM stocks WHERE symbol = 'MSFT';
-    #          SELECT * FROM stocks WHERE symbol = 'MSFT'
-    # Example: UPDATE stocks SET price = 310.0 WHERE symbol = 'MSFT'
-    def exec_multi_query(self, query):
-        # building database from scratch as it is more suitable for the purpose of the lab
-        db = Create()
-        con = Connect()
-        try:
-            path = os.path.dirname(os.path.abspath(__file__))
-            db_path = os.path.join(path, 'level-4.db')
-            db_con = con.create_connection(db_path)
-            cur = db_con.cursor()
-
-            res = "[METHOD EXECUTED] exec_multi_query\n"
-            for query in filter(None, query.split(';')):
-                res += "[QUERY]" + query + "\n"
-                query = query.strip()
-                cur.execute(query)
-                db_con.commit()
-
-                query_outcome = cur.fetchall()
-                for result in query_outcome:
-                    res += "[RESULT] " + str(result) + " "
-            return res
-
-        except sqlite3.Error as e:
-            print(f"ERROR: {e}")
-
-        finally:
-            db_con.close()
-
-    # executes any query or multiple queries as defined from the user in the form of script
-    # Example: SELECT price FROM stocks WHERE symbol = 'MSFT';
-    #          SELECT * FROM stocks WHERE symbol = 'MSFT'
-    def exec_user_script(self, query):
-        # building database from scratch as it is more suitable for the purpose of the lab
-        db = Create()
-        con = Connect()
-        try:
-            path = os.path.dirname(os.path.abspath(__file__))
-            db_path = os.path.join(path, 'level-4.db')
-            db_con = con.create_connection(db_path)
-            cur = db_con.cursor()
-
-            res = "[METHOD EXECUTED] exec_user_script\n"
-            res += "[QUERY] " + query + "\n"
-            if ';' in query:
-                res += "[SCRIPT EXECUTION]"
-                cur.executescript(query)
-                db_con.commit()
-            else:
-                cur.execute(query)
-                db_con.commit()
-                query_outcome = cur.fetchall()
-                for result in query_outcome:
-                    res += "[RESULT] " + str(result)
-            return res
-
-        except sqlite3.Error as e:
-            print(f"ERROR: {e}")
-
-        finally:
-            db_con.close()
+# We also covered this flaw in a blog post about OWASP's Top 10 proactive controls:
+# https://github.blog/2021-12-06-write-more-secure-code-owasp-top-10-proactive-controls/
